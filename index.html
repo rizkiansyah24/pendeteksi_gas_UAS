@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+
+    <!-- ==========================================
+         META
+    =========================================== -->
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>Sistem Deteksi Kebocoran Gas IoT</title>
+
+    <!-- ==========================================
+         CSS
+    =========================================== -->
+    <link rel="stylesheet" href="css/style.css">
+
+</head>
+
+<body>
+
+    <div class="container">
+
+        <!-- ==========================================
+             HEADER
+        =========================================== -->
+        <header>
+
+            <h1>Sistem Deteksi Kebocoran Gas IoT</h1>
+
+            <p>Arduino Uno D1 R32 (ESP32)</p>
+
+            <button id="themeButton">
+                🌙
+            </button>
+
+        </header>
+
+
+        <!-- ==========================================
+             STATUS KONEKSI
+        =========================================== -->
+        <section class="card">
+
+            <h2>Status Koneksi</h2>
+
+            <div class="status">
+
+                <span>ESP32</span>
+
+                <span id="espStatus" class="online">
+                    Online
+                </span>
+
+            </div>
+
+            <div class="status">
+
+                <span>MQTT</span>
+
+                <span id="mqttStatus" class="online">
+                    Connected
+                </span>
+
+            </div>
+
+        </section>
+
+
+        <!-- ==========================================
+             STATUS GAS
+        =========================================== -->
+        <section class="card">
+
+            <h2>Status Gas</h2>
+
+            <h1 id="gasStatus">
+                🟢 AMAN
+            </h1>
+
+        </section>
+
+
+        <!-- ==========================================
+             NILAI SENSOR MQ-5
+        =========================================== -->
+        <section class="card">
+
+            <h2>Nilai Sensor</h2>
+
+            <h1 id="gasValue">
+                0 ppm
+            </h1>
+
+        </section>
+
+
+        <!-- ==========================================
+             LEVEL GAS
+        =========================================== -->
+        <section class="card">
+
+            <h2>Level Gas</h2>
+
+            <div class="progress">
+
+                <div class="progress-bar"
+                     id="gasBar">
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- ==========================================
+             KONTROL LED
+        =========================================== -->
+        <section class="card">
+
+            <h2>Kontrol LED</h2>
+
+            <button id="ledOn">
+                LED ON
+            </button>
+
+            <button id="ledOff">
+                LED OFF
+            </button>
+
+            <button id="enableAudio">
+                🔊 Aktifkan Alarm
+            </button>
+
+        </section>
+
+
+        <!-- ==========================================
+             RIWAYAT MONITORING
+        =========================================== -->
+        <section class="card">
+
+            <h2>Riwayat Monitoring</h2>
+
+            <table class="history-table">
+
+                <thead>
+
+                    <tr>
+
+                        <th>No</th>
+
+                        <th>Waktu</th>
+
+                        <th>Status</th>
+
+                        <th>Nilai Sensor</th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody id="history">
+
+                </tbody>
+
+            </table>
+
+        </section>
+
+    </div>
+
+
+    <!-- ==========================================
+         AUDIO ALARM
+         Akan diputar saat status BOCOR
+    =========================================== -->
+    <audio id="alarmAudio" loop>
+
+        <source src="assets/audio/alarm.mp3"
+                type="audio/mpeg">
+
+    </audio>
+
+
+    <!-- ==========================================
+         LIBRARY MQTT
+    =========================================== -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+
+    <!-- ==========================================
+         MQTT
+    =========================================== -->
+    <script src="js/mqtt.js"></script>
+
+
+    <!-- ==========================================
+         DASHBOARD
+    =========================================== -->
+    <script src="js/app.js"></script>
+
+</body>
+
+</html>
