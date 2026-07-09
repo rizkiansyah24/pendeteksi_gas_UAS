@@ -1,5 +1,5 @@
 /*************************************************
- * PROJECT : Sistem Deteksi Kebocoran Gas IoT
+ * PROJECT : Sistem Deteksi Kebocoran Gas IoT (Updated PWM & DAC - Fix Version)
  * MATA KULIAH : Sistem Mikrokontroler
  * SEMESTER : 6
  * BOARD : Arduino Uno D1 R32 (ESP32)
@@ -40,11 +40,18 @@ const char* TOPIC_CONTROL    = "gas/control";
 /*************************************************
  * 5. KONFIGURASI PIN
  *************************************************/
-#define MQ5_PIN      34      // Sensor MQ-5
-#define LED_STATUS   18      // LED Indikator Sistem
+#define MQ5_PIN      34      // Sensor MQ-5 (ADC1_CH6)
+#define LED_STATUS   18      // LED Indikator Sistem (PWM)
+#define DAC_PIN      25      // Pin DAC Bawaan ESP32 (DAC_CHANNEL_1)
 
 /*************************************************
- * 6. PARAMETER SISTEM
+ * 6. KONFIGURASI PWM (LEDC VERSI 3.X) ESP32
+ *************************************************/
+const int PWM_FREQ      = 5000;     // Frekuensi 5 KHz
+const int PWM_RESOLUTION = 8;        // Resolusi 8-bit (Nilai: 0 - 255)
+
+/*************************************************
+ * 7. PARAMETER SISTEM
  *************************************************/
 const int GAS_THRESHOLD = 1800;
 
@@ -53,14 +60,14 @@ const unsigned long MQTT_INTERVAL   = 5000;
 const unsigned long LED_INTERVAL    = 1000;
 
 /*************************************************
- * 7. VARIABEL GLOBAL
+ * 8. VARIABEL GLOBAL
  *************************************************/
 int gasValue = 0;
 String gasStatus = "AMAN";
 
 bool wifiConnected = false;
 bool mqttConnected = false;
-bool ledStatus = false;
+int ledBrightness = 0;       // Menggantikan bool ledStatus untuk PWM
 bool ledEnable = true;
 
 unsigned long lastSensorRead = 0;
@@ -68,7 +75,7 @@ unsigned long lastMQTTSend   = 0;
 unsigned long lastBlink      = 0;
 
 /*************************************************
- * 8. OBJECT MQTT
+ * 9. OBJECT MQTT & FREERTOS
  *************************************************/
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -80,7 +87,7 @@ TaskHandle_t TaskPublishHandle = NULL;
 TaskHandle_t TaskConnectionHandle = NULL;
 
 /*************************************************
- * 9. FUNCTION
+ * 10. FUNCTION
  *************************************************/
 
 /*==================== WiFi ====================*/
@@ -126,15 +133,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length)
     if (message == "LED_ON")
     {
         ledEnable = true;
-
-        Serial.println("Mode LED : BERKEDIP");
+        Serial.println("Mode LED : BERKEDIP (PWM)");
     }
     else if (message == "LED_OFF")
     {
         ledEnable = false;
-
-        digitalWrite(LED_STATUS, LOW);
-
+        ledcWrite(LED_STATUS, 0); // Mematikan PWM langsung ke PIN LED
         Serial.println("Mode LED : MATI");
     }
 }
@@ -172,9 +176,10 @@ void connectMQTT()
     }
 }
 
-/*==================== Sensor MQ-5 ====================*/
+/*==================== Sensor MQ-5 (ADC) ====================*/
 void readGasSensor()
 {
+    // Penerapan ADC: Membaca nilai analog dari sensor
     gasValue = analogRead(MQ5_PIN);
 
     if (gasValue >= GAS_THRESHOLD)
@@ -183,11 +188,22 @@ void readGasSensor()
         gasStatus = "AMAN";
 
     Serial.println("------------------------------");
-    Serial.print("Nilai MQ5 : ");
+    Serial.print("Nilai MQ5 (ADC) : ");
     Serial.println(gasValue);
 
-    Serial.print("Status    : ");
+    Serial.print("Status          : ");
     Serial.println(gasStatus);
+}
+
+/*==================== Demonstrasi DAC ====================*/
+void runDACDemo()
+{
+    // Penerapan DAC: Mengeluarkan tegangan analog murni (0 - 255) ke DAC_PIN (GPIO25)
+    if (gasStatus == "BOCOR") {
+        dacWrite(DAC_PIN, 255); // Output tegangan penuh ~3.3V secara analog murni
+    } else {
+        dacWrite(DAC_PIN, 127); // Output tegangan setengah ~1.65V secara analog murni
+    }
 }
 
 /*==================== Publish MQTT ====================*/
@@ -218,149 +234,114 @@ void publishGasData()
     }
 }
 
-/*==================== LED ====================*/
+/*==================== LED dengan PWM (Pulse Width Modulation) ====================*/
 void blinkSystemLED()
 {
     // Jika LED dimatikan dari Dashboard
     if (!ledEnable)
     {
-        digitalWrite(LED_STATUS, LOW);
+        ledcWrite(LED_STATUS, 0);
         return;
     }
 
-    // LED berkedip normal
+    // Penerapan PWM: LED berkedip dengan tingkat kecerahan dinamis berdasarkan status gas
     if (millis() - lastBlink >= LED_INTERVAL)
     {
         lastBlink = millis();
 
-        ledStatus = !ledStatus;
+        if (ledBrightness == 0) {
+            // Jika AMAN = kedip redup (30), Jika BOCOR = kedip sangat terang (255)
+            ledBrightness = (gasStatus == "BOCOR") ? 255 : 30; 
+        } else {
+            ledBrightness = 0; // Kondisi mati saat berkedip
+        }
 
-        digitalWrite(LED_STATUS, ledStatus);
+        // Menuliskan nilai PWM langsung ke PIN LED (Sintaks ESP32 Core v3.x)
+        ledcWrite(LED_STATUS, ledBrightness);
     }
 }
 
+/*************************************************
+ * FREERTOS TASKS
+ *************************************************/
 void TaskLED(void *pvParameters)
 {
     while (true)
     {
         blinkSystemLED();
-
-        // Memberikan kesempatan Task lain berjalan
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
-/*************************************************
- * TASK SENSOR
- *************************************************/
 void TaskSensor(void *pvParameters)
 {
     while (true)
     {
         readGasSensor();
+        runDACDemo(); // Dipanggil bersamaan setelah data sensor diperbarui
         vTaskDelay(pdMS_TO_TICKS(SENSOR_INTERVAL));
     }
 }
 
-/*************************************************
- * TASK MQTT
- *************************************************/
 void TaskMQTT(void *pvParameters)
 {
     while (true)
     {
-        //--------------------------------------------
-        // Jika koneksi MQTT terputus
-        //--------------------------------------------
         if (!mqttClient.connected())
         {
             mqttConnected = false;
             connectMQTT();
         }
-
-        //--------------------------------------------
-        // Menjalankan MQTT Client
-        //--------------------------------------------
         mqttClient.loop();
-
-        //--------------------------------------------
-        // Delay 20 ms
-        //--------------------------------------------
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
 
-/*************************************************
- * TASK PUBLISH
- *************************************************/
 void TaskPublish(void *pvParameters)
 {
     while (true)
     {
-        //--------------------------------------------
-        // Mengirim data sensor ke Broker MQTT
-        //--------------------------------------------
         publishGasData();
-
-        //--------------------------------------------
-        // Delay 1 detik
-        //--------------------------------------------
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
-/*************************************************
- * TASK CONNECTION
- *************************************************/
 void TaskConnection(void *pvParameters)
 {
     while (true)
     {
-        //------------------------------------------------
-        // Cek WiFi
-        //------------------------------------------------
         if (WiFi.status() != WL_CONNECTED)
         {
-            Serial.println();
-            Serial.println("WiFi Terputus...");
-            Serial.println("Reconnect WiFi...");
-
+            Serial.println("\nWiFi Terputus... Reconnect WiFi...");
             wifiConnected = false;
-
             connectWiFi();
         }
 
-        //------------------------------------------------
-        // Cek MQTT
-        //------------------------------------------------
         if (!mqttClient.connected())
         {
-            Serial.println();
-            Serial.println("MQTT Terputus...");
-            Serial.println("Reconnect MQTT...");
-
+            Serial.println("\nMQTT Terputus... Reconnect MQTT...");
             mqttConnected = false;
-
             connectMQTT();
         }
-
-        //------------------------------------------------
-        // Delay 3 detik
-        //------------------------------------------------
         vTaskDelay(pdMS_TO_TICKS(3000));
     }
 }
+
 /*************************************************
- * 10. SETUP
+ * 11. SETUP
  *************************************************/
 void setup()
 {
     Serial.begin(115200);
 
+    // Setup ADC Pin
     pinMode(MQ5_PIN, INPUT);
-    pinMode(LED_STATUS, OUTPUT);
+    
+    // Setup PWM versi baru (ESP32 Core v3.x) menggantikan fungsi ledcSetup lama
+    ledcAttach(LED_STATUS, PWM_FREQ, PWM_RESOLUTION);
+    ledcWrite(LED_STATUS, 0); // Set awal mati
 
-    digitalWrite(LED_STATUS, LOW);
+    // Catatan: dacWrite() otomatis mengonfigurasi pin DAC (GPIO25), tidak perlu pinMode()
 
     Serial.println();
     Serial.println("======================================");
@@ -369,62 +350,20 @@ void setup()
 
     connectWiFi();
     connectMQTT();
-    xTaskCreatePinnedToCore(
-      TaskLED,          // Nama function
-      "Task LED",       // Nama Task
-      2048,             // Stack Size
-      NULL,             // Parameter
-      1,                // Priority
-      &TaskLEDHandle,   // Handle
-      1                 // Core
-  );
 
-    xTaskCreatePinnedToCore(
-      TaskSensor,
-      "Task Sensor",
-      2048,
-      NULL,
-      2,
-      &TaskSensorHandle,
-      1
-  );
-
-  xTaskCreatePinnedToCore(
-    TaskMQTT,
-    "Task MQTT",
-    4096,
-    NULL,
-    3,
-    &TaskMQTTHandle,
-    1
-);
-
-xTaskCreatePinnedToCore(
-    TaskPublish,
-    "Task Publish",
-    4096,
-    NULL,
-    2,
-    &TaskPublishHandle,
-    1
-);
-
-xTaskCreatePinnedToCore(
-    TaskConnection,
-    "Task Connection",
-    4096,
-    NULL,
-    4,
-    &TaskConnectionHandle,
-    1
-);
+    // Pembuatan Task FreeRTOS
+    xTaskCreatePinnedToCore(TaskLED, "Task LED", 2048, NULL, 1, &TaskLEDHandle, 1);
+    xTaskCreatePinnedToCore(TaskSensor, "Task Sensor", 2048, NULL, 2, &TaskSensorHandle, 1);
+    xTaskCreatePinnedToCore(TaskMQTT, "Task MQTT", 4096, NULL, 3, &TaskMQTTHandle, 1);
+    xTaskCreatePinnedToCore(TaskPublish, "Task Publish", 4096, NULL, 2, &TaskPublishHandle, 1);
+    xTaskCreatePinnedToCore(TaskConnection, "Task Connection", 4096, NULL, 4, &TaskConnectionHandle, 1);
 
     Serial.println("Sistem Siap Digunakan");
-    Serial.println("Task LED Berhasil Dibuat");
+    Serial.println("Semua Task Berhasil Dibuat");
 }
 
 /*************************************************
- * 11. LOOP
+ * 12. LOOP
  *************************************************/
 void loop()
 {
